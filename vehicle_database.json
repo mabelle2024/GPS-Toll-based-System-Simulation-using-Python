@@ -1,0 +1,16 @@
+[
+    {
+        "vehicle_no": "ABC123",
+        "owner": "John Doe",
+        "bank_account": "1234567890",
+        "vehicle_type": "TypeA",
+        "initial_ping": [12.955648, 77.471406]
+    },
+    {
+        "vehicle_no": "DEF456",
+        "owner": "Jane Smith",
+        "bank_account": "0987654321",
+        "vehicle_type": "TypeD",
+        "initial_ping": [12.872383, 77.498714]
+    }
+]
