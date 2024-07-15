@@ -7,6 +7,7 @@ The automation also decreases vehicle emissions caused by idling and frequent st
 
 Installation process:
 For main code: (actual project)
+pip install all necessary libraries.
 Download the geojson file for toll road data (can use any geojson file with toll data to scale the program)
 Download the json file to get vehicle details, or use you can use the cardealershipdb in Visual Studio Code to create and access your own vehicle details database.
 When using the jupyter program make sure to paste you actual path to the geojson and json files as well as your own google api key.
@@ -16,10 +17,10 @@ Run the code in jupyter, the output will be printed under the running cell and t
 For database provided: (for car dealers to enter vehicle and owner details in a user friendly manner, and it will get converted to json file for running the main code)
 
 Install Visual Studio Code and Node.js. After downloading all the files into cardealshipdb folder, run the server.js and then open the live server to access the front end. 
-Else directly downlaod the customer.json file for the vehicle details.
+Else directly downlaod the customer.json file for the vehicle details. Make sure all necessary libraries are installed.
 
 
-Basic Markdown Syntax
+Basic Markdown Syntax:
 Libraries
 folium: Interactive maps
 random: Random number generation
