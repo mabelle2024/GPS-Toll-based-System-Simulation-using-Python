@@ -1,0 +1,268 @@
+#main code for jupyter
+
+import folium
+import random
+import json
+from datetime import datetime
+from shapely.geometry import Point, LineString, MultiLineString
+from shapely.ops import nearest_points
+import geopandas as gpd
+import requests
+import time
+import sqlite3
+import csv
+
+# Create SQLite database and table
+conn = sqlite3.connect('toll_tracking.db')
+cursor = conn.cursor()
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS toll_records (
+    vehicle_no TEXT,
+    toll_price REAL,
+    time TIMESTAMP,
+    latitude REAL,
+    longitude REAL
+)
+''')
+conn.commit()
+
+# Function to save toll record to database and CSV file
+def save_toll_record(vehicle_no, toll_price, latitude, longitude, csv_filename):
+    if toll_price > 0:  # Only save records with a non-zero toll price
+        current_time = datetime.now()
+        cursor.execute('''
+        INSERT INTO toll_records (vehicle_no, toll_price, time, latitude, longitude)
+        VALUES (?, ?, ?, ?, ?)
+        ''', (vehicle_no, toll_price, current_time, latitude, longitude))
+        conn.commit()
+
+        # Append the record to the CSV file
+        with open(csv_filename, 'a', newline='') as csvfile:
+            csvwriter = csv.writer(csvfile)
+            csvwriter.writerow([vehicle_no, toll_price, current_time, latitude, longitude])
+
+# Function to export database to CSV
+def export_to_csv(cursor, csv_filename):
+    cursor.execute("SELECT * FROM toll_records")
+    rows = cursor.fetchall()
+    headers = [i[0] for i in cursor.description]
+
+    with open(csv_filename, 'w', newline='') as csvfile:
+        csvwriter = csv.writer(csvfile)
+        csvwriter.writerow(headers)  # Write the header row
+        csvwriter.writerows(rows)    # Write the data rows
+
+    print(f"Data has been exported to {csv_filename}")
+
+# Getting the GeoJSON file for toll road details to define toll zones and create map with highlighted toll roads
+geojson_file = 'Enter path to export_geojson'  # Replace with actual path of geojson file with toll road coordinates of India
+gdf = gpd.read_file(geojson_file)
+gdf = gdf.to_crs(epsg=32633)
+
+# Setting up the map around a single coordinate
+gdf_wgs84 = gdf.to_crs(epsg=4326)
+map_center = [gdf_wgs84.geometry.centroid.y.mean(), gdf_wgs84.geometry.centroid.x.mean()]
+m = folium.Map(location=map_center, zoom_start=12)
+
+# Function to add each route to the map
+def add_route_to_map(geometry):
+    if geometry.geom_type == 'LineString':
+        coords = [(coord[1], coord[0]) for coord in geometry.coords]
+        folium.PolyLine(coords, color='blue', weight=2.5).add_to(m)
+    elif geometry.geom_type == 'MultiLineString':
+        for line in geometry:
+            coords = [(coord[1], coord[0]) for coord in line.coords]
+            folium.PolyLine(coords, color='blue', weight=2.5).add_to(m)
+
+# Adding each route from the GeoDataFrame to the map
+gdf_wgs84.apply(lambda row: add_route_to_map(row.geometry), axis=1)
+
+# Saving the map to an HTML file
+map_file = 'routes_map.html'
+m.save(map_file)
+print(f"Map has been saved to {map_file}")
+
+# Function to check if a GPS ping is toll road route and get the nearest point on the route
+def nearest_point_on_route(latitude, longitude):
+    point = Point(longitude, latitude)
+    min_dist = float('inf')
+    nearest_pt = None
+    for geometry in gdf_wgs84.geometry:
+        if isinstance(geometry, (LineString, MultiLineString)):
+            for line in (geometry,) if isinstance(geometry, LineString) else geometry:
+                nearest = nearest_points(point, line)[1]
+                dist = point.distance(nearest)
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest_pt = nearest
+    return nearest_pt if min_dist < 0.01 else None  # Checks if the point is 10m away from the toll zone
+
+# Function to calculate distance between two points
+def calculate_distance(point1, point2):
+    return point1.distance(point2) * 111  # Convert degrees to km (approximately)
+
+# Function to get the address from coordinates using Google Maps API
+def get_address(api_key, latitude, longitude, retries=3):
+    url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={latitude},{longitude}&key={api_key}"
+    
+    for attempt in range(retries):
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                if data['status'] == 'OK':
+                    address = data['results'][0]['formatted_address']
+                    return address
+                else:
+                    return "Error: " + data['status']
+            else:
+                return f"HTTP Error: {response.status_code}"
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            if attempt < retries - 1:
+                print("Retrying...")
+                time.sleep(1)  
+            else:
+                return f"Max retries exceeded. Could not retrieve address."
+
+# Vehicle class
+class Vehicle:
+    toll_rates = { #can be edited to change the price per km for the car types as necessary
+        'TypeA': 2.0,  # Car/Jeep/Van
+        'TypeB': 2.5,  # LCV
+        'TypeC': 3.0,  # Bus/Truck
+        'TypeD': 3.5,  # Up to 3 axle vehicle
+        'TypeE': 4.0,  # 4 to 6 axle vehicle
+        'TypeF': 4.5   # HCM/EME
+    }
+
+    def __init__(self, vehicle_no, owner, bank_account, vehicle_type, initial_ping, api_key):
+        self.vehicle_no = vehicle_no
+        self.owner = owner
+        self.bank_account = bank_account
+        self.vehicle_type = vehicle_type
+        self.current_ping = initial_ping
+        self.total_distance = 0
+        self.previous_point = nearest_point_on_route(initial_ping[0], initial_ping[1])
+        self.entry_point = None  # To track entry point into the toll zone
+        self.marker = None
+        self.api_key = api_key
+        if self.previous_point is None:
+            print(f"Vehicle {self.vehicle_no} is not on the route initially.")
+    
+    def update_marker(self):
+        # Update marker position directly
+        if self.marker is not None:
+            self.marker.location = [self.current_ping[0], self.current_ping[1]]
+        else:
+            self.marker = folium.Marker(location=[self.current_ping[0], self.current_ping[1]], popup=f"Vehicle {self.vehicle_no}")
+            self.marker.add_to(m)
+
+    def update_location(self, csv_filename):
+        self.current_ping = (self.current_ping[0] + random.uniform(-0.01, 0.01), self.current_ping[1] + random.uniform(-0.01, 0.01))  # Increase movement range
+        current_point = nearest_point_on_route(self.current_ping[0], self.current_ping[1])
+        
+        if current_point is None:
+            address = get_address(self.api_key, self.current_ping[0], self.current_ping[1])
+            print(f"Vehicle {self.vehicle_no} has exited the route at {address}.")
+            total_cost = self.calculate_toll()
+            print(f"Vehicle {self.vehicle_no} traveled {self.total_distance:.2f} km on the route. Total cost: {total_cost:.2f} rupees.")
+            save_toll_record(self.vehicle_no, total_cost, self.current_ping[0], self.current_ping[1], csv_filename)
+            self.reset()
+        else:
+            if self.entry_point is None:  # Vehicle entering the toll zone for the first time
+                self.entry_point = current_point
+                entry_address = get_address(self.api_key, self.entry_point.y, self.entry_point.x)
+                print(f"Vehicle {self.vehicle_no} entered the toll zone at {entry_address}.")
+            if self.previous_point is not None:
+                distance = calculate_distance(self.previous_point, current_point)
+                self.total_distance += distance
+            self.previous_point = current_point
+            self.update_marker()  # Update marker position
+            print(f"Vehicle {self.vehicle_no} is traveling on the route. Total distance: {self.total_distance:.2f} km.")
+    
+    def calculate_toll(self):
+        base_rate = self.toll_rates.get(self.vehicle_type, 0)
+        current_time = datetime.now()
+        
+        # Adjusting the toll rate based on time of day
+        if 8 <= current_time.hour < 10 or 16 <= current_time.hour < 18.5:  # 4 PM to 6:30 PM change as per rush hour timings
+            base_rate += 1.0  # Peak hours
+        elif 1 <= current_time.hour < 5.5:  # 1 AM to 5:30 AM
+            base_rate -= 1.0  # Off-peak hours
+        
+        return self.total_distance * base_rate
+    
+    def reset(self):
+        self.total_distance = 0
+        self.entry_point = None  # Reset entry point
+        self.previous_point = nearest_point_on_route(self.current_ping[0], self.current_ping[1])
+        if self.previous_point is None:
+            print(f"Vehicle {self.vehicle_no} is not on the route initially.")
+
+# Function to track multiple vehicles
+def track_vehicles(vehicles, csv_filename):
+    try:
+        while True:
+            for vehicle in vehicles:
+                vehicle.update_location(csv_filename)
+                m.add_child(vehicle.marker)  # Add the marker to the map
+            m.save(map_file)  # Save the map to an HTML file with the updated markers
+            time.sleep(5)
+    except KeyboardInterrupt:
+        print("Tracking stopped.")
+        conn.close()  # Close the database connection when tracking is stopped
+
+# Loading vehicles from JSON file
+def load_vehicles_from_json(json_file, api_key):
+    try:
+        with open(json_file) as f:
+            vehicles_data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON in file '{json_file}': {e}")
+        return []
+    
+    vehicles = []
+    for vehicle_data in vehicles_data:
+        try:
+            vehicle_no = vehicle_data['vehicle_no']
+            owner = vehicle_data['owner']
+            bank_account = vehicle_data['bank_account']
+            vehicle_type = vehicle_data['vehicle_type']
+            initial_ping = vehicle_data['initial_ping']
+            
+            vehicle = Vehicle(vehicle_no, owner, bank_account, vehicle_type, initial_ping, api_key)
+            vehicles.append(vehicle)
+        except KeyError as e:
+            print(f"Missing key in vehicle data: {e}")
+    
+    return vehicles
+
+# Initialize the map and add route lines
+gdf_wgs84.apply(lambda row: add_route_to_map(row.geometry), axis=1)
+
+# Load vehicles from JSON file
+vehicles_file = 'Enter your path to vehcicle_database.json or customers.josn'  # Replace with path of the actual json file provided or with vehicle details from database on VSC
+api_key = 'Enter your google api key'  # Replace with your actual Google Maps API key, make sure Geocoding API, Places API and Maps JavaScript API is enabled
+vehicles = load_vehicles_from_json(vehicles_file, api_key)
+print(f"Loaded {len(vehicles)} vehicles from {vehicles_file}")
+
+# Add vehicle markers to the map
+for vehicle in vehicles:
+    vehicle.marker = folium.Marker(location=[vehicle.current_ping[0], vehicle.current_ping[1]], popup=f"Vehicle {vehicle.vehicle_no}")
+    vehicle.marker.add_to(m)
+
+# Save the map to an HTML file
+map_file = 'routes_map_with_markers.html'
+m.save(map_file)
+print(f"Map with markers has been saved to {map_file}")
+
+# Initialize the CSV file with headers
+csv_filename = 'toll_records.csv'
+with open(csv_filename, 'w', newline='') as csvfile:
+    csvwriter = csv.writer(csvfile)
+    csvwriter.writerow(['vehicle_no', 'toll_price', 'time', 'latitude', 'longitude'])
+
+# Track vehicles
+track_vehicles(vehicles, csv_filename)
