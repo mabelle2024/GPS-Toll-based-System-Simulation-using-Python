@@ -1,0 +1,72 @@
+[
+  {
+    "vehicle_no": "1234",
+    "owner": "Ryan G Arakkal",
+    "bank_account": "123456789",
+    "vehicle_type": "TypeA",
+    "initial_ping": {
+      "latitude": 12.8864882,
+      "longitude": 77.5060588
+    }
+  },
+  {
+    "vehicle_no": "12erd24",
+    "owner": "Ryan G Arakkal",
+    "bank_account": "ABC123DEF",
+    "vehicle_type": "Car",
+    "initial_ping": {
+      "latitude": 1,
+      "longitude": 2
+    }
+  },
+  {
+    "vehicle_no": "1256",
+    "owner": "Sambhram",
+    "bank_account": "01987",
+    "vehicle_type": "dios",
+    "initial_ping": {
+      "latitude": 24,
+      "longitude": 87
+    }
+  },
+  {
+    "vehicle_no": "KA51C1498",
+    "owner": "Smruthy",
+    "bank_account": "2262664",
+    "vehicle_type": "Car",
+    "initial_ping": {
+      "latitude": 12,
+      "longitude": 79
+    }
+  },
+  {
+    "vehicle_no": "kau uuui ",
+    "owner": "alina",
+    "bank_account": "5733688",
+    "vehicle_type": "jytcj",
+    "initial_ping": {
+      "latitude": 1,
+      "longitude": 2
+    }
+  },
+  {
+    "vehicle_no": "7070",
+    "owner": "A",
+    "bank_account": "2w3e4r",
+    "vehicle_type": "Car",
+    "initial_ping": {
+      "latitude": 12,
+      "longitude": 34
+    }
+  },
+  {
+    "vehicle_no": "KaA123",
+    "owner": "Donald Trump",
+    "bank_account": "12342dsfs",
+    "vehicle_type": "TypeA",
+    "initial_ping": {
+      "latitude": 12.6456,
+      "longitude": 77.3452
+    }
+  }
+]
